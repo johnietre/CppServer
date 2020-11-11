@@ -22,7 +22,7 @@
 #include <fstream>     // ifstream
 #include <functional>  // bind
 #include <future>      // async
-#include <iostream>    // perror
+#include <iostream>    // cerr
 
 using namespace std;
 using namespace Server;
