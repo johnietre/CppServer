@@ -53,6 +53,7 @@ class ResponseWriter {
   ResponseWriter(int sock_no);
   int WriteText(string text);
   int WriteFile(string filepath);
+  int PageNotFound(string filepath="");
 };
 
 typedef void route_handler(ResponseWriter w, Request &r);
@@ -65,6 +66,7 @@ class HTTPServer {
   bool running = false;
   string default_pattern = "";
   bool allow_partial = false;
+  string not_found_file = "";
   mutex server_mut;
   condition_variable condition;
   vector<thread> threads;
@@ -75,7 +77,7 @@ class HTTPServer {
   static void handle_conns(const bool *done_ref, queue<int> *queue_ref,
                            mutex *mutex_ref, condition_variable *cond_ref,
                            map<string, route_handler *> *routes_ref,
-                           string default_ref, bool allow_ref);
+                           string default_ref, bool allow_ref, string not_found_ref);
   static Request parse_header(string header);
   static void page_not_found(int sock);
   void submit_to_pool(int sock);
@@ -96,10 +98,12 @@ class HTTPServer {
   void setNumThreads(int num);
   void setDefaultPattern(string pattern);
   void setAllowPartial(bool allow);
+  void setNotFoundFile(string filepath);
   string getIPString();
   long getIPLong();
   short getPort();
   int getNumThreads();
+  string getNotFoundFile();
 };
 }  // namespace Server
 

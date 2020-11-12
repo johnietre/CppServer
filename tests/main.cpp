@@ -1,6 +1,6 @@
-// g++ -o main main.cpp server.cpp -lpthread -std=gnu++17
+// g++ -o main main.cpp ../src/server.cpp -lpthread -std=gnu++17
 
-#include "server.hpp"
+#include "../src/server.hpp"
 #include <iostream>
 #include <map>
 #include <string>
@@ -27,6 +27,7 @@ int main(int argc, char *argv[]) {
   server.handleFunc("/", &indexHandler);
   server.handleFunc("/home", &homeHandler);
   server.handleFunc("/static", &staticHandler);
+  server.setDefaultPattern("/");
   server.start();
   return 0;
 }

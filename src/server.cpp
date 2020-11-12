@@ -8,6 +8,7 @@
  * webbrowser, go to index, go to home, push back button, refresh, and push...
  * foward button
  * Look at throwing errors rather than returning error codes
+ * Implement a file server
  */
 
 #include "server.hpp"
@@ -106,6 +107,33 @@ int ResponseWriter::WriteFile(string filepath) {
   return 0;
 }
 
+int ResponseWriter::PageNotFound(string filepath) {
+  string response = STATUS_NOT_FOUND;
+  response += get_time_string();
+  response += "CONTENT-TYPE: text/html; charset=utf-8\r\n";
+  if (filepath == "") { // Send the default html
+    response += "CONTENT-LENGTH:  " + to_string(HTML_404.length()) + "\r\n";
+    response += "\r\n";
+    response += HTML_404;
+  } else {
+    ifstream file(filepath);
+    if (!file.is_open()) { // If the file isn't found, go to the default
+      PageNotFound("");
+      return SERVER_FILE_NOT_FOUND;
+    }
+    // Read the page not found file
+    unsigned long len = fs::file_size(filepath);
+    char *buffer = new char[len];
+    file.read(buffer, len);
+    response += buffer;
+    delete[] buffer;
+    file.close();
+  }
+  // Send response to the socket
+  write(sock, response.c_str(), response.length());
+  return 0;
+}
+
 /* Private Methods */
 
 // Returns an HTTP header compliant string representation of the current date
@@ -189,7 +217,7 @@ int HTTPServer::start(bool blocking) {
   for (int i = 0; i < num_threads; i++)
     threads.push_back(
         thread(bind(&handle_conns, &running, &sock_queue, &server_mut,
-                    &condition, &routes, default_pattern, allow_partial)));
+                    &condition, &routes, default_pattern, allow_partial, not_found_file)));
   if (blocking) run_server();
   // else
   //   async(test);
@@ -262,6 +290,10 @@ void HTTPServer::setAllowPartial(bool allow) {
   allow_partial = allow;
 }
 
+void HTTPServer::setNotFoundFile(string filepath) {
+  if (!running) not_found_file = filepath;
+}
+
 // Returns the IP address as a string
 string HTTPServer::getIPString() { return ""; }
 
@@ -273,6 +305,8 @@ short HTTPServer::getPort() { return port; }
 
 // Returns the number of threads
 int HTTPServer::getNumThreads() { return num_threads; }
+
+string HTTPServer::getNotFoundFile() { return not_found_file; }
 
 /* Private Methods */
 
@@ -317,7 +351,7 @@ void HTTPServer::run_server() {
 void HTTPServer::handle_conns(const bool *running_ref, queue<int> *queue_ref,
                               mutex *mutex_ref, condition_variable *cond_ref,
                               map<string, route_handler *> *routes_ref,
-                              string default_ref, bool allow_ref) {
+                              string default_ref, bool allow_ref, string not_found_ref) {
   char buffer[30000] = {0};  // Buffer for reading from the socket
   int sock, valread;  // the socket number and the number of bytes read (?)
   while ((*running_ref)) {
@@ -354,7 +388,7 @@ void HTTPServer::handle_conns(const bool *running_ref, queue<int> *queue_ref,
       if (default_ref != "")
         (*routes_ref)[default_ref](ResponseWriter(sock), req);
       else
-        page_not_found(sock);
+        ResponseWriter(sock).PageNotFound(not_found_ref);
     } else
       handler(ResponseWriter(sock), req);
     shutdown(sock, SHUT_WR);
