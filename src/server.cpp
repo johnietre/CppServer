@@ -193,14 +193,7 @@ HTTPServer::HTTPServer(long IP, short PORT, int thread_count) {
 }
 
 HTTPServer::~HTTPServer() {
-  if (!running) return;
-  {
-    unique_lock<mutex> lock(server_mut);
-    running = false;
-  }
-  condition.notify_all();  // wakes up all threads
-  int size = threads.size();
-  for (int i = 0; i < size; i++) threads[i].join();
+  stop();
 }
 
 // Starts the server
@@ -220,8 +213,21 @@ int HTTPServer::start(bool blocking) {
                     &condition, &routes, default_pattern, allow_partial, not_found_file)));
   if (blocking) run_server();
   // else
-  //   async(test);
+  //   async(run_server);
   return 0;
+}
+
+void HTTPServer::stop() {
+  if (!running) return;
+  puts("Stopping...");
+  {
+    unique_lock<mutex> lock(server_mut);
+    running = false;
+  }
+  condition.notify_all();  // wakes up all threads
+  int size = threads.size();
+  for (int i = 0; i < size; i++) threads[i].join();
+  puts("Stopped");
 }
 
 // Associates a function with a slug pattern

@@ -91,6 +91,7 @@ class HTTPServer {
   HTTPServer(long IP, short PORT, int thread_count);
   ~HTTPServer();
   int start(bool blocking = true);
+  void stop();
   bool handleFunc(string pattern, route_handler *handler);
   void setIP(string IP);
   void setIP(long IP);
