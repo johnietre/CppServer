@@ -1,2 +1,2 @@
 # CppServer
-An HTTP class for C++
+Socket and HTTP clients and servers for C++
