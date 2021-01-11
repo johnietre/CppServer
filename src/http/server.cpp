@@ -10,41 +10,43 @@
  * Look at throwing errors rather than returning error codes
  * Implement a file server
  * Implement option to either set thread count of pool or start thread per conn
- * Change from read and write to recv and send (socket.h)
+ * Change from read and write (unistd.h) to recv and send (socket.h)
+ * Possibly use map for content type in write file method
+ * Split up classes to individual files and rename this file to http_server
  */
 
 #include "server.hpp"
 
-#include <netinet/in.h>  // htons, htonl
-#include <string.h>      // memset
-#include <sys/socket.h>  // accept, bind, listen, shutdown, socklen_t, sockaddr, sockaddr_in, AF_INET, SOCK_STREAM
-#include <unistd.h>      // read, close
+#include <netinet/in.h> // htons, htonl
+#include <string.h>     // memset
+#include <sys/socket.h> // accept, bind, listen, shutdown, socklen_t, sockaddr, sockaddr_in, AF_INET, SOCK_STREAM
+#include <unistd.h>     // read, close
 
-#include <ctime>       // time_t, struct tm
-#include <filesystem>  // file_size
-#include <fstream>     // ifstream
-#include <functional>  // bind
-#include <future>      // async
-#include <iostream>    // perror
+#include <ctime>      // time_t, struct tm
+#include <filesystem> // file_size
+#include <fstream>    // ifstream
+#include <functional> // bind
+#include <future>     // async
+#include <iostream>   // perror
 
 using namespace std;
 using namespace Server;
 namespace fs = std::filesystem;
 
-const long LOCAL_HOST = 2130706433;  // 127.0.0.1
+const int bufferLen = 5000;
+const long LOCAL_HOST = 2130706433; // 127.0.0.1
 const string STATUS_OK = "HTTP/1.1 200 OK\r\n";
 const string STATUS_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n";
 const string days[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 const string months[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-const string HTML_404 =
-    "<!DOCTYPE HTML>\n"
-    "<html>"
-    "<head><title>404 Not Found</title></head>"
-    "<body>"
-    "<h1>404 Not Found</h1>"
-    "<p>The requested URL was not found on this server.</p>"
-    "</body></html>";
+const string HTML_404 = "<!DOCTYPE HTML>\n"
+                        "<html>"
+                        "<head><title>404 Not Found</title></head>"
+                        "<body>"
+                        "<h1>404 Not Found</h1>"
+                        "<p>The requested URL was not found on this server.</p>"
+                        "</body></html>";
 
 ///////////////////////////// Request /////////////////////////////
 
@@ -77,14 +79,16 @@ int ResponseWriter::WriteText(string text) {
 
 // Finds the file with the filepath, reads it in, and writes it to the socket
 int ResponseWriter::WriteFile(string filepath) {
-  ifstream file(filepath);
-  if (!file.is_open()) return SERVER_FILE_NOT_FOUND;
+  ifstream file(filepath, ifstream::binary);
+  if (!file.is_open())
+    return SERVER_FILE_NOT_FOUND;
   string response = STATUS_OK;
   // Get the time as a string
   response += get_time_string();
   // Check what type the file is
   size_t pos = filepath.rfind(".");
-  if (pos == string::npos) return SERVER_INVALID_FILE;
+  if (pos == string::npos)
+    return SERVER_INVALID_FILE;
   string ext = filepath.substr(pos);
   if (ext == ".html" || ext == ".htm")
     response += "CONTENT-TYPE: text/html; charset=utf-8\r\n";
@@ -92,20 +96,37 @@ int ResponseWriter::WriteFile(string filepath) {
     response += "CONTENT-TYPE: text/css; charset=utf-8\r\n";
   else if (ext == ".js")
     response += "CONTENT-TYPE: text/javascript; charset=utf-8\r\n";
+  else if (ext == ".ico")
+    response += "CONTENT-TYPE: image/vnd.microsoft.icon\r\n";
+  else if (ext == ".png")
+    response += "CONTENT-TYPE: image/png\r\n";
+  else if (ext == ".jpg" || ext == ".jpeg")
+    response += "CONTENT-TYPE: image/jpeg\r\n";
+  else if (ext == ".json")
+    response += "CONTENT-TYPE: application/json; charset=utf-8\r\n";
+  else if (ext == ".csv")
+    response += "CONTENT-TYPE: text/csv; charset=utf-8\r\n";
+  else if (ext == ".pdf")
+    response += "CONTENT-TYPE: application/pdf\r\n";
   else
     response += "CONTENT-TYPE: text/plain; charset=utf-8\r\n";
   // Find out the file size; POSSIBLY CALCULATE SIZE AS FILE IS READ IN
   unsigned long len = fs::file_size(filepath);
   response += "CONTENT-LENGTH: " + to_string(len) + "\r\n";
   response += "\r\n";
-  // Read the contents of the file and append them to the response
-  char *buffer = new char[len];
-  file.read(buffer, len);
-  response += buffer;
-  delete[] buffer;
-  file.close();
   // Send the response to the socket
   write(sock, response.c_str(), response.length());
+  // Read the contents of the file and append them to the response
+  char *buffer = new char[bufferLen];
+  while(len > bufferLen) {
+    file.read(buffer, bufferLen);
+    write(sock, buffer, bufferLen);
+    len -= bufferLen;
+  }
+  file.read(buffer, len);
+  write(sock, buffer, len);
+  delete[] buffer;
+  file.close();
   return 0;
 }
 
@@ -194,13 +215,12 @@ HTTPServer::HTTPServer(long IP, short PORT, int thread_count) {
   num_threads = thread_count;
 }
 
-HTTPServer::~HTTPServer() {
-  stop();
-}
+HTTPServer::~HTTPServer() { stop(); }
 
 // Starts the server
 int HTTPServer::start(bool blocking) {
-  if (running) return SERVER_ALREADY_RUNNING;
+  if (running)
+    return SERVER_ALREADY_RUNNING;
   running = true;
   // Check to make sure the default pattern has a matching function
   if (default_pattern != "") {
@@ -210,31 +230,35 @@ int HTTPServer::start(bool blocking) {
     }
   }
   for (int i = 0; i < num_threads; i++)
-    threads.push_back(
-        thread(bind(&handle_conns, &running, &sock_queue, &server_mut,
-                    &condition, &routes, default_pattern, allow_partial, not_found_file)));
-  if (blocking) run_server();
+    threads.push_back(thread(
+        bind(&handle_conns, &running, &sock_queue, &server_mut, &condition,
+             &routes, default_pattern, allow_partial, not_found_file)));
+  if (blocking)
+    run_server();
   // else
   //   async(run_server);
   return 0;
 }
 
 void HTTPServer::stop() {
-  if (!running) return;
+  if (!running)
+    return;
   puts("Stopping...");
   {
     unique_lock<mutex> lock(server_mut);
     running = false;
   }
-  condition.notify_all();  // wakes up all threads
+  condition.notify_all(); // wakes up all threads
   int size = threads.size();
-  for (int i = 0; i < size; i++) threads[i].join();
+  for (int i = 0; i < size; i++)
+    threads[i].join();
   puts("Stopped");
 }
 
 // Associates a function with a slug pattern
 bool HTTPServer::handleFunc(string pattern, route_handler *handler) {
-  if (routes[pattern] != nullptr) return false;
+  if (routes[pattern] != nullptr)
+    return false;
   routes[pattern] = handler;
   return true;
 }
@@ -242,7 +266,8 @@ bool HTTPServer::handleFunc(string pattern, route_handler *handler) {
 // Sets the IP address so long as the server isn't running
 // Only works with IPV4
 void HTTPServer::setIP(string IP) {
-  if (running) return;
+  if (running)
+    return;
   if (IP == "localhost") {
     ip = LOCAL_HOST;
     return;
@@ -256,14 +281,15 @@ void HTTPServer::setIP(string IP) {
       part += n;
     else {
       long sub = stol(part);
-      for (int i = 0; i < 4 - part_count; i++) sub *= 256;
+      for (int i = 0; i < 4 - part_count; i++)
+        sub *= 256;
       ip += sub;
       part = "";
       part_count++;
     }
   }
   ip += stol(part);
-  if (part_count != 4) {  // Handle invalid IPV4
+  if (part_count != 4) { // Handle invalid IPV4
     cerr << "Invalid part count";
     exit(EXIT_FAILURE);
   }
@@ -272,34 +298,40 @@ void HTTPServer::setIP(string IP) {
 
 // Sets the IP address so long as the server isn't running
 void HTTPServer::setIP(long IP) {
-  if (running) return;
+  if (running)
+    return;
   ip = htonl(IP);
 }
 
 // Sets the port so long as the server isn't running
 void HTTPServer::setPort(short PORT) {
-  if (running) return;
+  if (running)
+    return;
   port = PORT;
 }
 
 // Sets the number of threads so long as the server isn't running
 void HTTPServer::setNumThreads(int num) {
-  if (running) return;
+  if (running)
+    return;
   num_threads = num;
 }
 
 void HTTPServer::setDefaultPattern(string pattern) {
-  if (running) return;
+  if (running)
+    return;
   default_pattern = pattern;
 }
 
 void HTTPServer::setAllowPartial(bool allow) {
-  if (running) return;
+  if (running)
+    return;
   allow_partial = allow;
 }
 
 void HTTPServer::setNotFoundFile(string filepath) {
-  if (!running) not_found_file = filepath;
+  if (!running)
+    not_found_file = filepath;
 }
 
 // Returns the IP address as a string
@@ -359,18 +391,20 @@ void HTTPServer::run_server() {
 void HTTPServer::handle_conns(const bool *running_ref, queue<int> *queue_ref,
                               mutex *mutex_ref, condition_variable *cond_ref,
                               map<string, route_handler *> *routes_ref,
-                              string default_ref, bool allow_ref, string not_found_ref) {
-  char buffer[30000] = {0};  // Buffer for reading from the socket
-  int sock, valread;  // the socket number and the number of bytes read (?)
+                              string default_ref, bool allow_ref,
+                              string not_found_ref) {
+  char buffer[30000] = {0}; // Buffer for reading from the socket
+  int sock, valread; // the socket number and the number of bytes read (?)
   while ((*running_ref)) {
-    {  // Wait for the condition variable to notify the thread it can access the
+    { // Wait for the condition variable to notify the thread it can access the
       // queue to retrieve a socket
       // Must be in a seperate block for some reason
       unique_lock<mutex> lock(*mutex_ref);
       cond_ref->wait(lock, [queue_ref, running_ref] {
         return !queue_ref->empty() || !(*running_ref);
       });
-      if (!(*running_ref)) break;
+      if (!(*running_ref))
+        break;
       sock = queue_ref->front();
       queue_ref->pop();
     }
@@ -386,7 +420,8 @@ void HTTPServer::handle_conns(const bool *running_ref, queue<int> *queue_ref,
         curr += '/' + slug;
         handler = (*routes_ref)[curr];
         if (handler == nullptr) {
-          if (allow_ref) handler = (*routes_ref)[prev];
+          if (allow_ref)
+            handler = (*routes_ref)[prev];
           break;
         }
         prev = curr;
@@ -456,7 +491,7 @@ void HTTPServer::page_not_found(int sock) {
 
 // Sends a socket to the thread pool
 void HTTPServer::submit_to_pool(int sock) {
-  {  // Locks the mutex in order to send a socket to the queue and notify one of
+  { // Locks the mutex in order to send a socket to the queue and notify one of
     // the threads
     unique_lock<mutex> lock(server_mut);
     sock_queue.push(sock);
