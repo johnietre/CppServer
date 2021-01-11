@@ -1,5 +1,8 @@
-#ifndef SERVER_HPP
-#define SERVER_HPP
+#ifndef HTTP_SERVER_HPP
+#define HTTP_SERVER_HPP
+
+#include "request.hpp"
+#include "response_writer.hpp"
 
 #include <condition_variable> // condition_variable
 #include <map>                // map
@@ -11,8 +14,6 @@
 
 using namespace std;
 
-namespace Server {
-
 enum {
   ENUM_1,
   SERVER_FILE_NOT_FOUND,
@@ -22,38 +23,6 @@ enum {
 enum {
   ENUM_2,
   SERVER_ALREADY_RUNNING,
-};
-
-class Request {
-private:
-  char type = 'G';
-  string pattern = "";
-  string full_pattern = "";
-  string file = "";
-  vector<string> slugs;
-
-  friend class HTTPServer;
-
-public:
-  Request();
-  Request(char req_type, string req_pattern);
-  char getType();
-  string getPattern();
-  string getFullPattern();
-  string getFile();
-};
-
-class ResponseWriter {
-private:
-  int sock;
-
-  static string get_time_string();
-
-public:
-  ResponseWriter(int sock_no);
-  int WriteText(string text);
-  int WriteFile(string filepath);
-  int PageNotFound(string filepath = "");
 };
 
 typedef void route_handler(ResponseWriter w, Request &r);
@@ -107,6 +76,5 @@ public:
   int getNumThreads();
   string getNotFoundFile();
 };
-} // namespace Server
 
 #endif
