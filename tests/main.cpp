@@ -1,6 +1,6 @@
 // g++ -o main main.cpp ../src/server.cpp -lpthread -std=gnu++17
 
-#include "../src/server.hpp"
+#include "../src/http/server.hpp"
 #include <iostream>
 #include <map>
 #include <string>

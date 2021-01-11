@@ -9,6 +9,8 @@
  * foward button
  * Look at throwing errors rather than returning error codes
  * Implement a file server
+ * Implement option to either set thread count of pool or start thread per conn
+ * Change from read and write to recv and send (socket.h)
  */
 
 #include "server.hpp"

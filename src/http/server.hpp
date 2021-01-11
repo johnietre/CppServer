@@ -1,13 +1,13 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-#include <condition_variable>  // condition_variable
-#include <map>                 // map
-#include <mutex>               // mutex, unique_lock
-#include <queue>               // queue
-#include <string>              // string, stol
-#include <thread>              // thread
-#include <vector>              // vector
+#include <condition_variable> // condition_variable
+#include <map>                // map
+#include <mutex>              // mutex, unique_lock
+#include <queue>              // queue
+#include <string>             // string, stol
+#include <thread>             // thread
+#include <vector>             // vector
 
 using namespace std;
 
@@ -25,7 +25,7 @@ enum {
 };
 
 class Request {
- private:
+private:
   char type = 'G';
   string pattern = "";
   string full_pattern = "";
@@ -34,7 +34,7 @@ class Request {
 
   friend class HTTPServer;
 
- public:
+public:
   Request();
   Request(char req_type, string req_pattern);
   char getType();
@@ -44,22 +44,22 @@ class Request {
 };
 
 class ResponseWriter {
- private:
+private:
   int sock;
 
   static string get_time_string();
 
- public:
+public:
   ResponseWriter(int sock_no);
   int WriteText(string text);
   int WriteFile(string filepath);
-  int PageNotFound(string filepath="");
+  int PageNotFound(string filepath = "");
 };
 
 typedef void route_handler(ResponseWriter w, Request &r);
 
 class HTTPServer {
- private:
+private:
   long ip;
   short port;
   int num_threads = thread::hardware_concurrency();
@@ -77,12 +77,13 @@ class HTTPServer {
   static void handle_conns(const bool *done_ref, queue<int> *queue_ref,
                            mutex *mutex_ref, condition_variable *cond_ref,
                            map<string, route_handler *> *routes_ref,
-                           string default_ref, bool allow_ref, string not_found_ref);
+                           string default_ref, bool allow_ref,
+                           string not_found_ref);
   static Request parse_header(string header);
   static void page_not_found(int sock);
   void submit_to_pool(int sock);
 
- public:
+public:
   HTTPServer();
   HTTPServer(short PORT);
   HTTPServer(string IP, short PORT);
@@ -106,6 +107,6 @@ class HTTPServer {
   int getNumThreads();
   string getNotFoundFile();
 };
-}  // namespace Server
+} // namespace Server
 
 #endif
