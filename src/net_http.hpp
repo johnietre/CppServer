@@ -1,32 +1,271 @@
-/* TODO
- * Add the different statuses (like not found, internal server error)
- * Format the status to accept content type, length, etc
- * Read the request from the socket to get the method (GET, POST) and data
- * After that, implement all that data into an easily accessable form in request
- * (ie, proper http headers) Possibly use send/recv (sys/socket.h) instead of
- * write/read to reduce size Handle for empty buffers Ex of above: in a
- * webbrowser, go to index, go to home, push back button, refresh, and push...
- * foward button
- * Look at throwing errors rather than returning error codes
- * Implement a file server
- * Implement option to either set thread count of pool or start thread per conn
- * Change from read and write (unistd.h) to recv and send (socket.h)
- * Possibly use map for content type in write file method
- */
-
-#include "http_server.hpp"
+#ifndef NET_HTTP_HPP
+#define NET_HTTP_HPP
 
 #include <netinet/in.h> // htons, htonl
 #include <string.h>     // memset
 #include <sys/socket.h> // accept, bind, listen, shutdown, socklen_t, sockaddr, sockaddr_in, AF_INET, SOCK_STREAM
 #include <unistd.h>     // read, close
 
+#include <condition_variable> // condition_variable
+#include <filesystem>
+#include <fstream>
 #include <functional> // bind
 #include <future>     // async
 #include <iostream>   // perror
+#include <map>        // map
+#include <mutex>      // mutex, unique_lock
+#include <queue>      // queue
+#include <string>     // string, stol
+#include <thread>     // thread
+#include <vector>     // vector
 
 using namespace std;
+namespace fs = std::filesystem;
 
+namespace net_http {
+
+enum {
+  ENUM_1,
+  SERVER_FILE_NOT_FOUND,
+  SERVER_INVALID_FILE,
+};
+
+enum {
+  ENUM_2,
+  SERVER_ALREADY_RUNNING,
+};
+
+/* Request */
+
+class Request {
+private:
+  char type = 'G';
+  string pattern = "";
+  string full_pattern = "";
+  string file = "";
+  vector<string> slugs;
+
+  friend class HTTPServer;
+
+public:
+  Request();
+  Request(char req_type, string req_pattern);
+  char getType();
+  string getPattern();
+  string getFullPattern();
+  string getFile();
+};
+
+Request::Request() {}
+
+char Request::getType() { return type; }
+
+string Request::getPattern() { return pattern; }
+
+string Request::getFullPattern() { return full_pattern; }
+
+string Request::getFile() { return file; }
+
+/* Response Writer */
+
+class ResponseWriter {
+private:
+  int sock;
+
+  static string get_time_string();
+
+public:
+  ResponseWriter(int sock_no);
+  int WriteText(string text);
+  int WriteFile(string filepath);
+  int PageNotFound(string filepath = "");
+};
+
+const int bufferLen = 5000;
+const string STATUS_OK = "HTTP/1.1 200 OK\r\n";
+const string STATUS_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n";
+const string HTML_404 = "<!DOCTYPE HTML>\n"
+                        "<html>"
+                        "<head><title>404 Not Found</title></head>"
+                        "<body>"
+                        "<h1>404 Not Found</h1>"
+                        "<p>The requested URL was not found on this server.</p>"
+                        "</body></html>";
+const string days[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+const string months[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+ResponseWriter::ResponseWriter(int sock_no) { sock = sock_no; }
+
+// Writes plain text to the socket
+int ResponseWriter::WriteText(string text) {
+  string response = STATUS_OK;
+  // Get the time as a string
+  response += get_time_string();
+  response += "CONTENT-TYPE: text/plain; charset=utf-8\r\n";
+  response += "CONTENT-LENGTH: " + to_string(text.length()) + "\r\n";
+  response += "\r\n";
+  response += text;
+  write(sock, response.c_str(), response.length());
+  return 0;
+}
+
+// Finds the file with the filepath, reads it in, and writes it to the socket
+int ResponseWriter::WriteFile(string filepath) {
+  ifstream file(filepath, ifstream::binary);
+  if (!file.is_open())
+    return SERVER_FILE_NOT_FOUND;
+  string response = STATUS_OK;
+  // Get the time as a string
+  response += get_time_string();
+  // Check what type the file is
+  size_t pos = filepath.rfind(".");
+  if (pos == string::npos)
+    return SERVER_INVALID_FILE;
+  string ext = filepath.substr(pos);
+  if (ext == ".html" || ext == ".htm")
+    response += "CONTENT-TYPE: text/html; charset=utf-8\r\n";
+  else if (ext == ".css")
+    response += "CONTENT-TYPE: text/css; charset=utf-8\r\n";
+  else if (ext == ".js")
+    response += "CONTENT-TYPE: text/javascript; charset=utf-8\r\n";
+  else if (ext == ".ico")
+    response += "CONTENT-TYPE: image/vnd.microsoft.icon\r\n";
+  else if (ext == ".png")
+    response += "CONTENT-TYPE: image/png\r\n";
+  else if (ext == ".jpg" || ext == ".jpeg")
+    response += "CONTENT-TYPE: image/jpeg\r\n";
+  else if (ext == ".json")
+    response += "CONTENT-TYPE: application/json; charset=utf-8\r\n";
+  else if (ext == ".csv")
+    response += "CONTENT-TYPE: text/csv; charset=utf-8\r\n";
+  else if (ext == ".pdf")
+    response += "CONTENT-TYPE: application/pdf\r\n";
+  else
+    response += "CONTENT-TYPE: text/plain; charset=utf-8\r\n";
+  // Find out the file size; POSSIBLY CALCULATE SIZE AS FILE IS READ IN
+  unsigned long len = fs::file_size(filepath);
+  response += "CONTENT-LENGTH: " + to_string(len) + "\r\n";
+  response += "\r\n";
+  // Send the response to the socket
+  write(sock, response.c_str(), response.length());
+  // Read the contents of the file and append them to the response
+  char *buffer = new char[bufferLen];
+  for (; len > bufferLen; len -= bufferLen) {
+    file.read(buffer, bufferLen);
+    write(sock, buffer, bufferLen);
+  }
+  if (len) {
+    file.read(buffer, len);
+    write(sock, buffer, len);
+  }
+  delete[] buffer;
+  file.close();
+  return 0;
+}
+
+int ResponseWriter::PageNotFound(string filepath) {
+  string response = STATUS_NOT_FOUND;
+  response += get_time_string();
+  response += "CONTENT-TYPE: text/html; charset=utf-8\r\n";
+  if (filepath == "") { // Send the default html
+    response += "CONTENT-LENGTH:  " + to_string(HTML_404.length()) + "\r\n";
+    response += "\r\n";
+    response += HTML_404;
+  } else {
+    ifstream file(filepath);
+    if (!file.is_open()) { // If the file isn't found, go to the default
+      PageNotFound("");
+      return SERVER_FILE_NOT_FOUND;
+    }
+    // Read the page not found file
+    unsigned long len = fs::file_size(filepath);
+    char *buffer = new char[len];
+    file.read(buffer, len);
+    response += buffer;
+    delete[] buffer;
+    file.close();
+  }
+  // Send response to the socket
+  write(sock, response.c_str(), response.length());
+  return 0;
+}
+
+// Returns an HTTP header compliant string representation of the current date
+// Possibly integrate into write functions
+string ResponseWriter::get_time_string() {
+  // Possibly use C-String since string will always 38B
+  time_t t = time(nullptr);
+  tm *gmtm = gmtime(&t);
+  string stime = "Date: ";
+  stime += days[gmtm->tm_wday] + ", ";
+  stime += (gmtm->tm_mday > 9) ? to_string(gmtm->tm_mday)
+                               : '0' + to_string(gmtm->tm_mday);
+  stime += ' ' + months[gmtm->tm_mon] + ' ';
+  stime += to_string(gmtm->tm_year + 1900) + ' ';
+  stime += (gmtm->tm_hour > 9) ? to_string(gmtm->tm_hour) + ':'
+                               : '0' + to_string(gmtm->tm_hour) + ':';
+  stime += (gmtm->tm_min > 9) ? to_string(gmtm->tm_min) + ':'
+                              : '0' + to_string(gmtm->tm_min) + ':';
+  stime += (gmtm->tm_sec > 9) ? to_string(gmtm->tm_sec) + ':'
+                              : '0' + to_string(gmtm->tm_sec) + ':';
+  stime += " GMT\r\n";
+  return stime;
+}
+
+typedef void route_handler(ResponseWriter w, Request &r);
+
+class HTTPServer {
+private:
+  long ip;
+  short port;
+  int num_threads = thread::hardware_concurrency();
+  bool running = false;
+  string default_pattern = "";
+  bool allow_partial = false;
+  string not_found_file = "";
+  mutex server_mut;
+  condition_variable condition;
+  vector<thread> threads;
+  queue<int> sock_queue;
+  map<string, route_handler *> routes;
+
+  void run_server();
+  static void handle_conns(const bool *done_ref, queue<int> *queue_ref,
+                           mutex *mutex_ref, condition_variable *cond_ref,
+                           map<string, route_handler *> *routes_ref,
+                           string default_ref, bool allow_ref,
+                           string not_found_ref);
+  static Request parse_header(string header);
+  static void page_not_found(int sock);
+  void submit_to_pool(int sock);
+
+public:
+  HTTPServer();
+  HTTPServer(short PORT);
+  HTTPServer(string IP, short PORT);
+  HTTPServer(long IP, short PORT);
+  HTTPServer(string IP, short PORT, int thread_count);
+  HTTPServer(long IP, short PORT, int thread_count);
+  ~HTTPServer();
+  int start(bool blocking = true);
+  void stop();
+  bool handleFunc(string pattern, route_handler *handler);
+  void setIP(string IP);
+  void setIP(long IP);
+  void setPort(short PORT);
+  void setNumThreads(int num);
+  void setDefaultPattern(string pattern);
+  void setAllowPartial(bool allow);
+  void setNotFoundFile(string filepath);
+  string getIPString();
+  long getIPLong();
+  short getPort();
+  int getNumThreads();
+  string getNotFoundFile();
+};
+
+using namespace std;
 
 const long LOCAL_HOST = 2130706433; // 127.0.0.1
 
@@ -229,8 +468,10 @@ void HTTPServer::run_server() {
     if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
                              (socklen_t *)&addrlen)) < 0) {
       cerr << "Error in accept\n";
-    } else
+    } else {
       submit_to_pool(new_socket);
+      cout << address.sin_port;
+    }
   }
 }
 
@@ -338,3 +579,6 @@ void HTTPServer::submit_to_pool(int sock) {
   }
   condition.notify_one();
 }
+
+}; // namespace net_http
+#endif
