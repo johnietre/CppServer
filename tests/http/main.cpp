@@ -1,4 +1,4 @@
-// g++ -o main main.cpp ../src/server.cpp -lpthread -std=gnu++17
+// g++ -o main main.cpp -lpthread -std=gnu++17
 
 #include "../../src/net_http.hpp"
 #include <iostream>

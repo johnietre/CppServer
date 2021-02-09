@@ -18,6 +18,8 @@ Socket and HTTP clients and servers for C++
 - Possibly use map for content type in write file method
 - Implement websocket
 - Use socket net_socket.hpp
+- Remove "using namespace std;" to avoid naming collisions
 ## Socket
 - Add UDP
 - Add shutdown read and write individually
+
