@@ -1,12 +1,12 @@
 // g++ -o main main.cpp ../src/server.cpp -lpthread -std=gnu++17
 
-#include "../src/http/server.hpp"
+#include "../../src/net_http.hpp"
 #include <iostream>
 #include <map>
 #include <string>
 #include <thread>
 using namespace std;
-using namespace Server;
+using namespace net_http;
 
 void indexHandler(ResponseWriter w, Request &r) {
   w.WriteFile("index.html");

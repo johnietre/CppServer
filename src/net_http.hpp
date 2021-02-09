@@ -470,7 +470,7 @@ void HTTPServer::run_server() {
       cerr << "Error in accept\n";
     } else {
       submit_to_pool(new_socket);
-      cout << address.sin_port;
+      // cout << address.sin_port;
     }
   }
 }
