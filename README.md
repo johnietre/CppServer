@@ -2,6 +2,7 @@
 Socket and HTTP clients and servers for C++
 
 # Todo
+- Use "asio" library
 ## HTTP
 - Add the different statuses (like not found, internal server error)
 - Format the status to accept content type, length, etc
